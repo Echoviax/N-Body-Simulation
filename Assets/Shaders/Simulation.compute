@@ -1,5 +1,6 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CSMain
+#pragma kernel CSMain_ResetTree
 
 // Collapse last two itns into float 3s to take up less storage?
 struct OctreeNode // Section 2.1, Hsin Hung
@@ -20,7 +21,7 @@ struct Particle
 
 // main data buffer
 RWStructuredBuffer<Particle> _ParticleBuffer;
-StructuredBuffer<OctreeNode> _OctreeBuffer;
+RWStructuredBuffer<OctreeNode> _OctreeBuffer;
 
 float _Time;
 float _DeltaTime; 
@@ -29,6 +30,7 @@ float _MaxColorSpeed;
 float _ParticleCount;
 
 int _RootNodeIndex;
+int _OctreeNodeCount;
 float _Theta;
 
 #define THREAD_GROUP_SIZE 64
@@ -49,14 +51,32 @@ float3 CalculateForce(float4 cm1, float4 cm2)
     return _GravityStrength * cm1.w * cm2.w * directionVector * invDistCube;
 };
 
+// resets the tree to nothing values. each thread manages it's own point in the array
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSMain_ResetTree (uint3 id : SV_DispatchThreadID)
 {
-    // Code will go here, I'm sure
+    uint index = id.x;
+    if (index >= _OctreeNodeCount)
+    {
+        return;
+    }
+
+    _OctreeBuffer[index].centerOfMass = float4(0.0, 0.0, 0.0, 0.0);
+    _OctreeBuffer[index].boundsMin = float3(0.0, 0.0, 0.0);
+    _OctreeBuffer[index].boundsMax = float3(0.0, 0.0, 0.0);
+    
+    _OctreeBuffer[index].firstChildIndex = -1; // no children (leaf node)
+    _OctreeBuffer[index].particleIndex = -1; // no particle
+
+    if (index == _RootNodeIndex)
+    {
+        _OctreeBuffer[index].boundsMin = float3(1.0e38, 1.0e38, 1.0e38);
+        _OctreeBuffer[index].boundsMax = float3(-1.0e38, -1.0e38, -1.0e38);
+    }
 };
 
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void CSMain_ComputeBoundingBox (uint3 id : SV_DispatchThreadID)
+void CSMain_ComputeBoundingBox (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
 {
     // Code will go here, I'm sure
 };
