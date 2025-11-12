@@ -13,7 +13,7 @@ struct OctreeNode // Section 2.1, Hsin Hung
 
 struct Particle 
 {
-    float4 position_mass; // xyz pos, w mass
+    float4 positionMass; // xyz pos, w mass
     float3 velocity;
     float4 color;
 };
@@ -27,14 +27,51 @@ float _DeltaTime;
 float _GravityStrength;
 float _MaxColorSpeed;
 float _ParticleCount;
-float _DistanceThreshold;
 
 int _RootNodeIndex;
 float _Theta;
 
 #define THREAD_GROUP_SIZE 64
+#define MAX_RECURSION_DEPTH 64
 
 groupshared Particle _SharedParticles[THREAD_GROUP_SIZE];
+
+float3 CalculateForce(float4 cm1, float4 cm2)
+{
+    float3 directionVector = cm2.xyz - cm1.xyz;
+    float epsilon = 1e-5;
+    float distSqr = dot(directionVector, directionVector) + epsilon;
+
+    float inverseDist = rsqrt(distSqr);
+    float invDistCube = inverseDist * inverseDist * inverseDist;
+    
+    // F = G * m_particle * m_node * r / (dist^3)
+    return _GravityStrength * cm1.w * cm2.w * directionVector * invDistCube;
+};
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMain_ResetTree (uint3 id : SV_DispatchThreadID)
+{
+    // Code will go here, I'm sure
+};
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMain_ComputeBoundingBox (uint3 id : SV_DispatchThreadID)
+{
+    // Code will go here, I'm sure
+};
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMain_ConstructTree (uint3 id : SV_DispatchThreadID)
+{
+    // Code will go here, I'm sure
+};
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMain_CalculateForce (uint3 id : SV_DispatchThreadID)
+{
+    // Code will go here, I'm sure
+};
 
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
@@ -59,8 +96,8 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
         else
         {
             // if particle count is not divisible by 64, load a dummy particle
-            _SharedParticles[local_id.x].position_mass.w = 0.0;
-            _SharedParticles[local_id.x].position_mass = float4(0,0,0,0);
+            _SharedParticles[local_id.x].positionMass.w = 0.0;
+            _SharedParticles[local_id.x].positionMass = float4(0,0,0,0);
         }
 
         // wait for all threads to finish loading
@@ -70,29 +107,18 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
         for (uint i = 0; i < THREAD_GROUP_SIZE; i++)
         {
             Particle target = _SharedParticles[i];
-            
-            if (target.position_mass.w == 0.0) continue;
+            if (target.positionMass.w == 0.0) continue;
 
-            float3 directionVector = target.position_mass.xyz - p.position_mass.xyz;
-            float epsilon = 1e-5;
-            float distSqr = dot(directionVector, directionVector) + epsilon;
-
-            if (distSqr < _DistanceThreshold * _DistanceThreshold) continue;
-
-            float inverseDist = rsqrt(distSqr);
-            float invDistCube = inverseDist * inverseDist * inverseDist;
-            
-            // F = G * m1 * m2 * r / (dist^3)
-            totalForce += _GravityStrength * p.position_mass.w * target.position_mass.w * directionVector * invDistCube;
+            totalForce += CalculateForce(p.positionMass, target.positionMass);
         }
         
         // wait again
         GroupMemoryBarrierWithGroupSync();
     }
     
-    float3 acceleration = totalForce / p.position_mass.w;
+    float3 acceleration = totalForce / p.positionMass.w;
     p.velocity += acceleration * _DeltaTime;
-    p.position_mass.xyz += p.velocity * _DeltaTime;
+    p.positionMass.xyz += p.velocity * _DeltaTime;
 
     float4 hotColor = float4(1.0, 0.8, 0.2, 1.0); // yellow
     float4 coolColor = float4(0.8, 0.1, 0.0, 1.0); // red

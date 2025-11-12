@@ -14,7 +14,6 @@ public class Simulation : MonoBehaviour
     public float gravityStrength = 100.0f;
 
     public float maxColorSpeed = 5.0f;
-    public float distanceThreshold = 0.5f;
 
     public ComputeShader computeShader;
     public Material particleMaterial;
@@ -55,7 +54,6 @@ public class Simulation : MonoBehaviour
         computeShader.SetFloat("_GravityStrength", gravityStrength);
         computeShader.SetFloat("_MaxColorSpeed", maxColorSpeed);
         computeShader.SetFloat("_ParticleCount", particleCount);
-        computeShader.SetFloat("_DistanceThreshold", distanceThreshold);
 
         int threadGroups = (particleCount + 63) / 64;
         computeShader.Dispatch(kernelHandle, threadGroups, 1, 1);
