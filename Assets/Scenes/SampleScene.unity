@@ -149,9 +149,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   particleCount: 100000
+  octreeNodes: 100000
   gravityStrength: 0.00001
   maxColorSpeed: 5
-  distanceThreshold: 0.5
   computeShader: {fileID: 7200000, guid: c2fa375caad324d4fa202fd69c84fa84, type: 3}
   particleMaterial: {fileID: 2100000, guid: 7050e5e5a10539b4c82e112351a418c1, type: 2}
 --- !u!4 &81177246

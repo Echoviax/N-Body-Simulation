@@ -1,6 +1,7 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CSMain
 #pragma kernel CSMain_ResetTree
+#pragma kernel CSMain_ComputeBoundingBox
 
 // Collapse last two itns into float 3s to take up less storage?
 struct OctreeNode // Section 2.1, Hsin Hung
@@ -22,6 +23,7 @@ struct Particle
 // main data buffer
 RWStructuredBuffer<Particle> _ParticleBuffer;
 RWStructuredBuffer<OctreeNode> _OctreeBuffer;
+RWStructuredBuffer<int> _Mutex;
 
 float _Time;
 float _DeltaTime; 
@@ -33,10 +35,12 @@ int _RootNodeIndex;
 int _OctreeNodeCount;
 float _Theta;
 
-#define THREAD_GROUP_SIZE 64
+#define THREAD_GROUP_SIZE 32
 #define MAX_RECURSION_DEPTH 64
 
 groupshared Particle _SharedParticles[THREAD_GROUP_SIZE];
+groupshared float3 g_minBounds[THREAD_GROUP_SIZE];
+groupshared float3 g_maxBounds[THREAD_GROUP_SIZE];
 
 float3 CalculateForce(float4 cm1, float4 cm2)
 {
@@ -78,8 +82,54 @@ void CSMain_ResetTree (uint3 id : SV_DispatchThreadID)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSMain_ComputeBoundingBox (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
 {
-    // Code will go here, I'm sure
-};
+    uint global_id = id.x;
+    uint local_tid = local_id.x;
+
+    float3 pos = float3(0.0, 0.0, 0.0);
+    if (global_id < _ParticleCount)
+    {
+        pos = _ParticleBuffer[global_id].positionMass.xyz;
+    }
+
+    g_minBounds[local_tid] = (global_id < _ParticleCount) ? pos : float3(1.0e38, 1.0e38, 1.0e38);
+    g_maxBounds[local_tid] = (global_id < _ParticleCount) ? pos : float3(-1.0e38, -1.0e38, -1.0e38);
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint s = THREAD_GROUP_SIZE / 2; s > 0; s >>= 1)
+    {
+        if (local_tid < s)
+        {
+            g_minBounds[local_tid] = min(g_minBounds[local_tid], g_minBounds[local_tid + s]);
+            g_maxBounds[local_tid] = max(g_maxBounds[local_tid], g_maxBounds[local_tid + s]);
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (local_tid == 0)
+    {
+        uint original_value;
+        InterlockedCompareExchange(_Mutex[0], 0, 1, original_value);
+        while (original_value != 0)
+        {
+            InterlockedCompareExchange(_Mutex[0], 0, 1, original_value);
+        }
+
+        float3 globalMin = _OctreeBuffer[_RootNodeIndex].boundsMin;
+        float3 globalMax = _OctreeBuffer[_RootNodeIndex].boundsMax;
+        
+        float3 newMin = min(globalMin, g_minBounds[0]);
+        float3 newMax = max(globalMax, g_maxBounds[0]);
+
+        float padding = 0.01;
+        newMin -= float3(padding, padding, padding);
+        newMax += float3(padding, padding, padding);
+        
+        _OctreeBuffer[_RootNodeIndex].boundsMin = newMin;
+        _OctreeBuffer[_RootNodeIndex].boundsMax = newMax;
+
+        InterlockedExchange(_Mutex[0], 0, original_value);
+    }
+}
 
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSMain_ConstructTree (uint3 id : SV_DispatchThreadID)

@@ -31,17 +31,22 @@ public class Simulation : MonoBehaviour
     private int octreeNodeSize = sizeof(float) * 10 + sizeof(int) * 2;
     private ComputeBuffer particleBuffer;
     private ComputeBuffer octreeBuffer;
+    private ComputeBuffer mutexBuffer;
     private int kernelHandle;
     private int kernelResetTree;
-    private const float THREAD_GROUP_SIZE = 64;
+    private int kernelComputeBoundingBox;
+    private const float THREAD_GROUP_SIZE = 32;
 
     void Start()
     {
         kernelHandle = computeShader.FindKernel("CSMain");
         kernelResetTree = computeShader.FindKernel("CSMain_ResetTree");
+        kernelComputeBoundingBox = computeShader.FindKernel("CSMain_ComputeBoundingBox");
 
         particleBuffer = new ComputeBuffer(particleCount, particleSize);
         octreeBuffer = new ComputeBuffer(octreeNodes, octreeNodeSize);
+        mutexBuffer = new ComputeBuffer(1, sizeof(int));
+        mutexBuffer.SetData(new int[] { 0 });
 
         Particle[] particleArray = new Particle[particleCount];
         for (int i = 0; i < particleCount; i++)
@@ -59,7 +64,13 @@ public class Simulation : MonoBehaviour
 
         particleBuffer.SetData(particleArray);
         computeShader.SetBuffer(kernelHandle, "_ParticleBuffer", particleBuffer);
+
         computeShader.SetBuffer(kernelResetTree, "_OctreeBuffer", octreeBuffer);
+
+        computeShader.SetBuffer(kernelComputeBoundingBox, "_ParticleBuffer", particleBuffer);
+        computeShader.SetBuffer(kernelComputeBoundingBox, "_OctreeBuffer", octreeBuffer);
+        computeShader.SetBuffer(kernelComputeBoundingBox, "_Mutex", mutexBuffer);
+
         particleMaterial.SetBuffer("_ParticleBuffer", particleBuffer);
     }
 
@@ -71,11 +82,14 @@ public class Simulation : MonoBehaviour
         computeShader.SetFloat("_MaxColorSpeed", maxColorSpeed);
         computeShader.SetFloat("_ParticleCount", particleCount);
         computeShader.SetInt("_OctreeNodeCount", octreeNodes);
+        computeShader.SetInt("_RootNodeIndex", 0);
+        mutexBuffer.SetData(new int[] { 0 });
 
-        //int threadGroups = Mathf.CeilToInt(octreeNodes / THREAD_GROUP_SIZE);
-        //computeShader.Dispatch(kernelResetTree, threadGroups, 1, 1);
-
+        int octreeThreadGroups = Mathf.CeilToInt(octreeNodes / THREAD_GROUP_SIZE);
         int particleThreadGroups = Mathf.CeilToInt(particleCount / THREAD_GROUP_SIZE);
+
+        //computeShader.Dispatch(kernelResetTree, octreeThreadGroups, 1, 1);
+        //computeShader.Dispatch(kernelComputeBoundingBox, particleThreadGroups, 1, 1);
         computeShader.Dispatch(kernelHandle, particleThreadGroups, 1, 1);
     }
 
@@ -90,6 +104,14 @@ public class Simulation : MonoBehaviour
         if (particleBuffer != null)
         {
             particleBuffer.Release();
+        }
+        if (octreeBuffer != null)
+        {
+            octreeBuffer.Release();
+        }
+        if (mutexBuffer != null)
+        {
+            mutexBuffer.Release();
         }
     }
 }
