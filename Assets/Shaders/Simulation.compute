@@ -1,0 +1,92 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+struct Particle 
+{
+    float3 position;
+    float3 velocity;
+    float mass;
+    float4 color;
+};
+
+// main data buffer
+RWStructuredBuffer<Particle> _ParticleBuffer;
+float _Time;
+float _DeltaTime; 
+float _GravityStrength;
+float _MaxColorSpeed;
+float _ParticleCount;
+float _DistanceThreshold;
+
+#define THREAD_GROUP_SIZE 64
+
+groupshared Particle _SharedParticles[THREAD_GROUP_SIZE];
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
+{
+    Particle p = _ParticleBuffer[id.x];
+
+    float3 totalForce = float3(0.0, 0.0, 0.0);
+    
+    uint tileCount = (uint)_ParticleCount / THREAD_GROUP_SIZE;
+    if (_ParticleCount % THREAD_GROUP_SIZE != 0)
+    {
+        tileCount += 1;
+    }
+    
+    for (uint tile = 0; tile < tileCount; tile++)
+    {
+        uint tile_index = tile * THREAD_GROUP_SIZE + local_id.x;
+        if (tile_index < _ParticleCount)
+        {
+            _SharedParticles[local_id.x] = _ParticleBuffer[tile_index];
+        }
+        else
+        {
+            // if particle count is not divisible by 64, load a dummy particle
+            _SharedParticles[local_id.x].mass = 0.0;
+            _SharedParticles[local_id.x].position = float3(0,0,0);
+        }
+
+        // wait for all threads to finish loading
+        GroupMemoryBarrierWithGroupSync();
+
+        // only calculate against shared memory
+        for (uint i = 0; i < THREAD_GROUP_SIZE; i++)
+        {
+            Particle target = _SharedParticles[i];
+            
+            if (target.mass == 0.0) continue;
+
+            float3 directionVector = target.position - p.position;
+            float epsilon = 1e-5;
+            float distSqr = dot(directionVector, directionVector) + epsilon;
+
+            if (distSqr < _DistanceThreshold * _DistanceThreshold) continue;
+
+            float inverseDist = rsqrt(distSqr);
+            float invDistCube = inverseDist * inverseDist * inverseDist;
+            
+            // F = G * m1 * m2 * r / (dist^3)
+            totalForce += _GravityStrength * p.mass * target.mass * directionVector * invDistCube;
+        }
+        
+        // wait again
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    float3 acceleration = totalForce / p.mass;
+    p.velocity += acceleration * _DeltaTime;
+    p.position += p.velocity * _DeltaTime;
+
+    float4 hotColor = float4(1.0, 0.8, 0.2, 1.0); // yellow
+    float4 coolColor = float4(0.8, 0.1, 0.0, 1.0); // red
+
+    float speed = length(p.velocity);
+    float t = saturate(speed / _MaxColorSpeed);
+    p.color = lerp(coolColor, hotColor, t);
+
+    // update particle
+    _ParticleBuffer[id.x] = p;
+}
