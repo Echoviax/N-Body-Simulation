@@ -1,22 +1,36 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CSMain
 
+// Collapse last two itns into float 3s to take up less storage?
+struct OctreeNode // Section 2.1, Hsin Hung
+{
+    float4 centerOfMass; // xyz pos, w mass
+    float3 boundsMin;
+    float3 boundsMax;
+    int firstChildIndex;
+    int particleIndex;
+};
+
 struct Particle 
 {
-    float3 position;
+    float4 position_mass; // xyz pos, w mass
     float3 velocity;
-    float mass;
     float4 color;
 };
 
 // main data buffer
 RWStructuredBuffer<Particle> _ParticleBuffer;
+StructuredBuffer<OctreeNode> _OctreeBuffer;
+
 float _Time;
 float _DeltaTime; 
 float _GravityStrength;
 float _MaxColorSpeed;
 float _ParticleCount;
 float _DistanceThreshold;
+
+int _RootNodeIndex;
+float _Theta;
 
 #define THREAD_GROUP_SIZE 64
 
@@ -45,8 +59,8 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
         else
         {
             // if particle count is not divisible by 64, load a dummy particle
-            _SharedParticles[local_id.x].mass = 0.0;
-            _SharedParticles[local_id.x].position = float3(0,0,0);
+            _SharedParticles[local_id.x].position_mass.w = 0.0;
+            _SharedParticles[local_id.x].position_mass = float4(0,0,0,0);
         }
 
         // wait for all threads to finish loading
@@ -57,9 +71,9 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
         {
             Particle target = _SharedParticles[i];
             
-            if (target.mass == 0.0) continue;
+            if (target.position_mass.w == 0.0) continue;
 
-            float3 directionVector = target.position - p.position;
+            float3 directionVector = target.position_mass.xyz - p.position_mass.xyz;
             float epsilon = 1e-5;
             float distSqr = dot(directionVector, directionVector) + epsilon;
 
@@ -69,16 +83,16 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 local_id : SV_GroupThreadID)
             float invDistCube = inverseDist * inverseDist * inverseDist;
             
             // F = G * m1 * m2 * r / (dist^3)
-            totalForce += _GravityStrength * p.mass * target.mass * directionVector * invDistCube;
+            totalForce += _GravityStrength * p.position_mass.w * target.position_mass.w * directionVector * invDistCube;
         }
         
         // wait again
         GroupMemoryBarrierWithGroupSync();
     }
     
-    float3 acceleration = totalForce / p.mass;
+    float3 acceleration = totalForce / p.position_mass.w;
     p.velocity += acceleration * _DeltaTime;
-    p.position += p.velocity * _DeltaTime;
+    p.position_mass.xyz += p.velocity * _DeltaTime;
 
     float4 hotColor = float4(1.0, 0.8, 0.2, 1.0); // yellow
     float4 coolColor = float4(0.8, 0.1, 0.0, 1.0); // red

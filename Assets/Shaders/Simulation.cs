@@ -3,9 +3,8 @@ using UnityEngine.UIElements;
 
 public struct Particle
 {
-    public Vector3 position;
+    public Vector4 positionMass; // more efficient due to GPUs reading in 16 byte blocks
     public Vector3 velocity;
-    public float mass;
     public Vector4 color;
 }
 
@@ -33,11 +32,13 @@ public class Simulation : MonoBehaviour
         Particle[] particleArray = new Particle[particleCount];
         for (int i = 0; i < particleCount; i++)
         {
+            Vector4 positionMass = Random.insideUnitSphere * 10;
+            positionMass.w = 1; // mass
+
             particleArray[i] = new Particle
             {
-                position = Random.insideUnitSphere * 10,
+                positionMass = positionMass,
                 velocity = Vector3.zero,
-                mass = 1,
                 color = Vector4.zero,
             };
         }
